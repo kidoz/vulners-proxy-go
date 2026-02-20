@@ -1,0 +1,80 @@
+version: 2
+
+project_name: vulners-proxy
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: vulners-proxy
+    main: ./cmd/vulners-proxy
+    binary: vulners-proxy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - configs/config.toml
+      - packaging/systemd/vulners-proxy.service
+
+nfpms:
+  - id: packages
+    package_name: vulners-proxy
+    vendor: Vulners
+    homepage: https://vulners.com
+    maintainer: Vulners <support@vulners.com>
+    description: Reverse proxy for the Vulners API
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: configs/config.toml
+        dst: /etc/vulners-proxy/config.toml
+        type: config|noreplace
+      - src: packaging/systemd/vulners-proxy.service
+        dst: /usr/lib/systemd/system/vulners-proxy.service
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+      postremove: packaging/scripts/postremove.sh
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+    rpm:
+      group: System Environment/Daemons
+    overrides:
+      deb:
+        dependencies:
+          - systemd
+      rpm:
+        dependencies:
+          - systemd
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

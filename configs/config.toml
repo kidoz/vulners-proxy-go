@@ -1,0 +1,20 @@
+[server]
+host = "0.0.0.0"
+port = 8000                      # 0 or omitted → defaults to 8000
+body_max_bytes = 10485760        # 10 MB
+
+[server.rate_limit]
+enabled = false                  # set to true to enable per-IP rate limiting
+requests_per_second = 100        # max sustained requests per second per IP
+
+[vulners]
+api_key = ""                     # optional; if empty, clients must send X-Api-Key header
+
+[upstream]
+base_url = "https://vulners.com"
+timeout_seconds = 120
+idle_connections = 100
+
+[log]
+level = "info"                   # debug | info | warn | error
+format = "json"                  # json | text
