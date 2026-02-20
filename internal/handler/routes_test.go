@@ -30,7 +30,7 @@ func TestRegisterRoutes_Wiring(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vc := client.NewVulnersClient(cfg, logger)
+	vc := client.NewVulnersClient(cfg, logger, nil)
 	svc, err := service.NewProxyServiceForTest(vc, cfg, logger)
 	if err != nil {
 		t.Fatalf("NewProxyServiceForTest: %v", err)

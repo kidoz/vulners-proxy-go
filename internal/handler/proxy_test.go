@@ -43,7 +43,7 @@ func TestProxyHandler_Handle_ConfigAPIKey(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vc := client.NewVulnersClient(cfg, logger)
+	vc := client.NewVulnersClient(cfg, logger, nil)
 	svc, err := newTestProxyService(vc, cfg, logger)
 	if err != nil {
 		t.Fatalf("NewProxyService: %v", err)
@@ -95,7 +95,7 @@ func TestProxyHandler_Handle_HeaderAPIKey(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vc := client.NewVulnersClient(cfg, logger)
+	vc := client.NewVulnersClient(cfg, logger, nil)
 	svc, err := newTestProxyService(vc, cfg, logger)
 	if err != nil {
 		t.Fatalf("NewProxyService: %v", err)
@@ -127,7 +127,7 @@ func TestProxyHandler_Handle_MissingAPIKey(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vc := client.NewVulnersClient(cfg, logger)
+	vc := client.NewVulnersClient(cfg, logger, nil)
 	svc, err := newTestProxyService(vc, cfg, logger)
 	if err != nil {
 		t.Fatalf("NewProxyService: %v", err)
@@ -178,7 +178,7 @@ func TestProxyHandler_Handle_POST(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vc := client.NewVulnersClient(cfg, logger)
+	vc := client.NewVulnersClient(cfg, logger, nil)
 	svc, err := newTestProxyService(vc, cfg, logger)
 	if err != nil {
 		t.Fatalf("NewProxyService: %v", err)
@@ -217,7 +217,7 @@ func TestProxyHandler_Handle_CanceledContext(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	vc := client.NewVulnersClient(cfg, logger)
+	vc := client.NewVulnersClient(cfg, logger, nil)
 	svc, err := newTestProxyService(vc, cfg, logger)
 	if err != nil {
 		t.Fatalf("NewProxyService: %v", err)

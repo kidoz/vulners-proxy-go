@@ -448,6 +448,137 @@ func TestFindConfigInPaths_Priority(t *testing.T) {
 	}
 }
 
+func TestLoad_MetricsPathDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	data := `
+[upstream]
+base_url = "https://vulners.com"
+
+[metrics]
+enabled = true
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cliWithPath(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Metrics.Path != "/metrics" {
+		t.Errorf("Metrics.Path = %q, want %q", cfg.Metrics.Path, "/metrics")
+	}
+}
+
+func TestLoad_MetricsPathNoLeadingSlash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	data := `
+[upstream]
+base_url = "https://vulners.com"
+
+[metrics]
+enabled = true
+path = "metrics"
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(cliWithPath(path))
+	if err == nil {
+		t.Fatal("Load() expected error for metrics.path without leading slash, got nil")
+	}
+	if !strings.Contains(err.Error(), "metrics.path") {
+		t.Errorf("error = %q, want mention of metrics.path", err)
+	}
+}
+
+func TestLoad_MetricsPathConflictsWithAPIRoute(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"api/v3 exact", "/api/v3"},
+		{"api/v3 sub", "/api/v3/metrics"},
+		{"api/v4 exact", "/api/v4"},
+		{"healthz", "/healthz"},
+		{"proxy/status", "/proxy/status"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.toml")
+			data := `
+[upstream]
+base_url = "https://vulners.com"
+
+[metrics]
+enabled = true
+path = "` + tt.path + `"
+`
+			if err := os.WriteFile(cfgPath, []byte(data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Load(cliWithPath(cfgPath))
+			if err == nil {
+				t.Fatalf("Load() expected error for metrics.path=%q conflicting with route, got nil", tt.path)
+			}
+			if !strings.Contains(err.Error(), "conflicts") {
+				t.Errorf("error = %q, want mention of conflict", err)
+			}
+		})
+	}
+}
+
+func TestLoad_MetricsPathValid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	data := `
+[upstream]
+base_url = "https://vulners.com"
+
+[metrics]
+enabled = true
+path = "/custom-metrics"
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cliWithPath(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Metrics.Path != "/custom-metrics" {
+		t.Errorf("Metrics.Path = %q, want %q", cfg.Metrics.Path, "/custom-metrics")
+	}
+}
+
+func TestLoad_MetricsDisabledSkipsPathValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	data := `
+[upstream]
+base_url = "https://vulners.com"
+
+[metrics]
+enabled = false
+path = "bad-no-slash"
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(cliWithPath(path))
+	if err != nil {
+		t.Fatalf("Load() error = %v; disabled metrics should skip path validation", err)
+	}
+}
+
 func TestServerConfig_Addr(t *testing.T) {
 	sc := &ServerConfig{Host: "127.0.0.1", Port: 3000}
 	want := "127.0.0.1:3000"

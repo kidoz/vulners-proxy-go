@@ -23,14 +23,14 @@ var allowedUpstreamHosts = map[string]bool{
 }
 
 // forwardableRequestHeaders are the only request headers forwarded upstream.
+// Note: X-Real-Ip and X-Forwarded-For are intentionally excluded to prevent
+// clients from injecting arbitrary identity information into upstream requests.
 var forwardableRequestHeaders = []string{
 	"Accept",
 	"Accept-Encoding",
 	"Accept-Language",
 	"Content-Type",
 	"Content-Length",
-	"X-Real-Ip",
-	"X-Forwarded-For",
 }
 
 // forwardableResponseHeaders are the only response headers forwarded to the client.
@@ -125,12 +125,23 @@ func (s *ProxyService) resolveAPIKey(header http.Header) string {
 	return header.Get("X-Api-Key")
 }
 
+// isSensitiveQueryParam reports whether the query parameter key is an API key
+// variant that must be stripped before forwarding upstream. The check is
+// case-insensitive to catch apiKey, ApiKey, APIKEY, api_key, etc.
+func isSensitiveQueryParam(key string) bool {
+	lower := strings.ToLower(key)
+	return lower == "apikey" || lower == "api_key"
+}
+
 func (s *ProxyService) buildUpstreamURL(path string, query url.Values) string {
 	u := *s.baseURL
 	u.Path = path
 
 	q := make(url.Values)
 	for k, v := range query {
+		if isSensitiveQueryParam(k) {
+			continue
+		}
 		q[k] = v
 	}
 	u.RawQuery = q.Encode()

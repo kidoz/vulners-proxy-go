@@ -32,6 +32,7 @@ type Config struct {
 	Vulners  VulnersConfig  `toml:"vulners"`
 	Upstream UpstreamConfig `toml:"upstream"`
 	Log      LogConfig      `toml:"log"`
+	Metrics  MetricsConfig  `toml:"metrics"`
 
 	filePath string // resolved config file path (unexported)
 }
@@ -66,6 +67,12 @@ type UpstreamConfig struct {
 type LogConfig struct {
 	Level  string `toml:"level"`
 	Format string `toml:"format"`
+}
+
+// MetricsConfig holds Prometheus metrics settings.
+type MetricsConfig struct {
+	Enabled bool   `toml:"enabled"`
+	Path    string `toml:"path"`
 }
 
 // Load reads the TOML config file and applies CLI overrides.
@@ -166,6 +173,20 @@ func (c *Config) validate() error {
 	default:
 		return fmt.Errorf("log.format must be one of: json, text; got %q", c.Log.Format)
 	}
+
+	// Metrics path validation (only when metrics are enabled).
+	if c.Metrics.Enabled && c.Metrics.Path != "" {
+		p := c.Metrics.Path
+		if p[0] != '/' {
+			return fmt.Errorf("metrics.path must start with '/'; got %q", p)
+		}
+		for _, reserved := range []string{"/api/v3", "/api/v4", "/healthz", "/proxy/status"} {
+			if p == reserved || strings.HasPrefix(p, reserved+"/") {
+				return fmt.Errorf("metrics.path %q conflicts with reserved route %q", p, reserved)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -194,6 +215,9 @@ func (c *Config) setDefaults() {
 	}
 	if c.Log.Format == "" {
 		c.Log.Format = "json"
+	}
+	if c.Metrics.Path == "" {
+		c.Metrics.Path = "/metrics"
 	}
 }
 

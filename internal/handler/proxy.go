@@ -61,6 +61,11 @@ func (h *ProxyHandler) Handle(c echo.Context) error {
 
 	c.Response().WriteHeader(resp.StatusCode)
 
+	// Stream the upstream body directly to the client. If io.Copy fails
+	// mid-stream (e.g. client disconnect, network error), the HTTP status
+	// code has already been sent, so the client receives a truncated
+	// response with the original status. This is an inherent trade-off of
+	// streaming proxies — we log the error for observability.
 	if _, err := io.Copy(c.Response(), resp.Body); err != nil {
 		h.logger.Error("streaming response body",
 			"err", err,

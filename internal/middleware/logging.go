@@ -8,7 +8,15 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// healthPaths are paths logged at Debug level to reduce noise from frequent
+// liveness/readiness probes.
+var healthPaths = map[string]bool{
+	"/healthz":      true,
+	"/proxy/status": true,
+}
+
 // RequestLogger returns an Echo middleware that logs each request with slog.
+// Health-check paths are logged at Debug level; all other paths at Info.
 func RequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -19,7 +27,7 @@ func RequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 			req := c.Request()
 			res := c.Response()
 
-			logger.Info("request",
+			attrs := []any{
 				"method", req.Method,
 				"path", req.URL.Path,
 				"status", res.Status,
@@ -27,7 +35,13 @@ func RequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 				"request_id", res.Header().Get(echo.HeaderXRequestID),
 				"remote_ip", c.RealIP(),
 				"bytes_out", res.Size,
-			)
+			}
+
+			if healthPaths[req.URL.Path] {
+				logger.Debug("request", attrs...)
+			} else {
+				logger.Info("request", attrs...)
+			}
 
 			return err
 		}

@@ -18,3 +18,7 @@ idle_connections = 100
 [log]
 level = "info"                   # debug | info | warn | error
 format = "json"                  # json | text
+
+[metrics]
+enabled = false                  # set to true to expose Prometheus metrics
+path = "/metrics"                # HTTP path for the metrics endpoint

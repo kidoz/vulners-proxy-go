@@ -6,9 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"vulners-proxy-go/internal/client"
 	"vulners-proxy-go/internal/config"
 	"vulners-proxy-go/internal/model"
 )
@@ -23,6 +25,8 @@ func TestFilterRequestHeaders(t *testing.T) {
 		"X-Vulners-Token": {"abc123"},
 		"X-Custom-Header": {"should-be-dropped"},
 		"X-Api-Key":       {"should-be-dropped"},
+		"X-Real-Ip":       {"1.2.3.4"},
+		"X-Forwarded-For": {"1.2.3.4, 5.6.7.8"},
 	}
 
 	dst := s.filterRequestHeaders(src)
@@ -39,6 +43,8 @@ func TestFilterRequestHeaders(t *testing.T) {
 		{"Connection stripped", "Connection", 0},
 		{"X-Custom-Header stripped", "X-Custom-Header", 0},
 		{"X-Api-Key stripped by filter", "X-Api-Key", 0},
+		{"X-Real-Ip stripped", "X-Real-Ip", 0},
+		{"X-Forwarded-For stripped", "X-Forwarded-For", 0},
 		{"User-Agent injected", "User-Agent", 1},
 	}
 
@@ -120,6 +126,48 @@ func TestBuildUpstreamURL(t *testing.T) {
 			query: url.Values{},
 			want:  "",
 		},
+		{
+			name:  "apiKey stripped",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"apiKey": {"secret"}, "query": {"test"}},
+			want:  "query=test",
+		},
+		{
+			name:  "apikey lowercase stripped",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"apikey": {"secret"}, "query": {"test"}},
+			want:  "query=test",
+		},
+		{
+			name:  "ApiKey mixed case stripped",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"ApiKey": {"secret"}, "query": {"test"}},
+			want:  "query=test",
+		},
+		{
+			name:  "APIKEY uppercase stripped",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"APIKEY": {"secret"}, "query": {"test"}},
+			want:  "query=test",
+		},
+		{
+			name:  "api_key underscore stripped",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"api_key": {"secret"}, "query": {"test"}},
+			want:  "query=test",
+		},
+		{
+			name:  "API_KEY uppercase underscore stripped",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"API_KEY": {"secret"}, "query": {"test"}},
+			want:  "query=test",
+		},
+		{
+			name:  "only apiKey stripped leaves empty query",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"apiKey": {"secret"}},
+			want:  "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -183,6 +231,115 @@ func TestResolveAPIKey(t *testing.T) {
 				t.Errorf("resolveAPIKey() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestForward_HappyPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "test-key" {
+			t.Errorf("X-Api-Key = %q, want %q", r.Header.Get("X-Api-Key"), "test-key")
+		}
+		if r.URL.Query().Get("apiKey") != "" {
+			t.Errorf("apiKey query param should be stripped, got %q", r.URL.Query().Get("apiKey"))
+		}
+		if r.URL.Query().Get("query") != "cve-2024-1234" {
+			t.Errorf("query param = %q, want %q", r.URL.Query().Get("query"), "cve-2024-1234")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		Vulners: config.VulnersConfig{APIKey: "test-key"},
+		Upstream: config.UpstreamConfig{
+			BaseURL:         upstream.URL,
+			TimeoutSeconds:  10,
+			IdleConnections: 10,
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	vc := client.NewVulnersClient(cfg, logger, nil)
+	svc, err := NewProxyServiceForTest(vc, cfg, logger)
+	if err != nil {
+		t.Fatalf("NewProxyServiceForTest: %v", err)
+	}
+
+	pr := &model.ProxyRequest{
+		Ctx:    context.Background(),
+		Method: http.MethodGet,
+		Path:   "/api/v3/search/lucene/",
+		Query:  url.Values{"query": {"cve-2024-1234"}, "apiKey": {"should-be-stripped"}},
+		Header: http.Header{},
+	}
+
+	resp, err := svc.Forward(pr)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != `{"result":"ok"}` {
+		t.Errorf("body = %q, want %q", string(body), `{"result":"ok"}`)
+	}
+}
+
+func TestForward_FiltersResponseHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Set-Cookie", "session=abc")
+		w.Header().Set("X-Internal-Debug", "secret")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		Vulners: config.VulnersConfig{APIKey: "test-key"},
+		Upstream: config.UpstreamConfig{
+			BaseURL:         upstream.URL,
+			TimeoutSeconds:  10,
+			IdleConnections: 10,
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	vc := client.NewVulnersClient(cfg, logger, nil)
+	svc, err := NewProxyServiceForTest(vc, cfg, logger)
+	if err != nil {
+		t.Fatalf("NewProxyServiceForTest: %v", err)
+	}
+
+	pr := &model.ProxyRequest{
+		Ctx:    context.Background(),
+		Method: http.MethodGet,
+		Path:   "/api/v3/test",
+		Query:  url.Values{},
+		Header: http.Header{},
+	}
+
+	resp, err := svc.Forward(pr)
+	if err != nil {
+		t.Fatalf("Forward() error = %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", resp.Header.Get("Content-Type"), "application/json")
+	}
+	if resp.Header.Get("Set-Cookie") != "" {
+		t.Errorf("Set-Cookie should be stripped, got %q", resp.Header.Get("Set-Cookie"))
+	}
+	if resp.Header.Get("X-Internal-Debug") != "" {
+		t.Errorf("X-Internal-Debug should be stripped, got %q", resp.Header.Get("X-Internal-Debug"))
 	}
 }
 

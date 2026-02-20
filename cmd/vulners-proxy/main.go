@@ -13,12 +13,14 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/fx"
 	"golang.org/x/time/rate"
 
 	"vulners-proxy-go/internal/client"
 	"vulners-proxy-go/internal/config"
 	"vulners-proxy-go/internal/handler"
+	"vulners-proxy-go/internal/metrics"
 	"vulners-proxy-go/internal/middleware"
 	"vulners-proxy-go/internal/service"
 )
@@ -44,6 +46,7 @@ func main() {
 			func() handler.Version { return handler.Version(version) },
 			config.Load,
 			newLogger,
+			newMetrics,
 			newEcho,
 			client.NewVulnersClient,
 			service.NewProxyService,
@@ -78,7 +81,14 @@ func newLogger(cfg *config.Config) *slog.Logger {
 	return slog.New(h)
 }
 
-func newEcho(cfg *config.Config, logger *slog.Logger) *echo.Echo {
+func newMetrics(cfg *config.Config) *metrics.Metrics {
+	if !cfg.Metrics.Enabled {
+		return nil
+	}
+	return metrics.New()
+}
+
+func newEcho(cfg *config.Config, logger *slog.Logger, m *metrics.Metrics) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -95,13 +105,35 @@ func newEcho(cfg *config.Config, logger *slog.Logger) *echo.Echo {
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 	e.Use(middleware.RequestLogger(logger))
+	if m != nil {
+		e.Use(middleware.MetricsMiddleware(m))
+	}
 	e.Use(echomw.BodyLimit(fmt.Sprintf("%dB", cfg.Server.BodyMaxBytes)))
 	e.Use(middleware.SecurityHeaders())
 
 	if cfg.Server.RateLimit.Enabled {
 		store := echomw.NewRateLimiterMemoryStore(rate.Limit(cfg.Server.RateLimit.RequestsPerSecond))
-		e.Use(echomw.RateLimiter(store))
+		e.Use(echomw.RateLimiterWithConfig(echomw.RateLimiterConfig{
+			Store: store,
+			IdentifierExtractor: func(c echo.Context) (string, error) {
+				// Use the direct TCP peer address, not X-Forwarded-For or
+				// X-Real-IP, to prevent rate-limit bypass via spoofed headers.
+				// If the proxy sits behind a trusted load balancer, configure
+				// Echo's TrustProxy settings and switch to c.RealIP() instead.
+				ip, _, err := net.SplitHostPort(c.Request().RemoteAddr)
+				if err != nil {
+					// RemoteAddr may lack a port (e.g. Unix socket); use it as-is.
+					return c.Request().RemoteAddr, nil //nolint:nilerr // fallback is intentional
+				}
+				return ip, nil
+			},
+		}))
 		logger.Info("rate limiter enabled", "rps", cfg.Server.RateLimit.RequestsPerSecond)
+	}
+
+	if m != nil {
+		e.GET(cfg.Metrics.Path, echo.WrapHandler(promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{})))
+		logger.Info("metrics endpoint enabled", "path", cfg.Metrics.Path)
 	}
 
 	return e
