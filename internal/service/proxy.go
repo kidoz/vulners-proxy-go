@@ -29,6 +29,8 @@ var forwardableRequestHeaders = []string{
 	"Accept-Language",
 	"Content-Type",
 	"Content-Length",
+	"X-Real-Ip",
+	"X-Forwarded-For",
 }
 
 // forwardableResponseHeaders are the only response headers forwarded to the client.
@@ -97,8 +99,9 @@ func (s *ProxyService) Forward(pr *model.ProxyRequest) (*model.ProxyResponse, er
 		return nil, ErrMissingAPIKey
 	}
 
-	upstreamURL := s.buildUpstreamURL(pr.Path, pr.Query, apiKey)
+	upstreamURL := s.buildUpstreamURL(pr.Path, pr.Query)
 	header := s.filterRequestHeaders(pr.Header)
+	header.Set("X-Api-Key", apiKey)
 
 	s.logger.Debug("forwarding request",
 		"method", pr.Method,
@@ -122,7 +125,7 @@ func (s *ProxyService) resolveAPIKey(header http.Header) string {
 	return header.Get("X-Api-Key")
 }
 
-func (s *ProxyService) buildUpstreamURL(path string, query url.Values, apiKey string) string {
+func (s *ProxyService) buildUpstreamURL(path string, query url.Values) string {
 	u := *s.baseURL
 	u.Path = path
 
@@ -130,7 +133,6 @@ func (s *ProxyService) buildUpstreamURL(path string, query url.Values, apiKey st
 	for k, v := range query {
 		q[k] = v
 	}
-	q.Set("apiKey", apiKey)
 	u.RawQuery = q.Encode()
 
 	return u.String()

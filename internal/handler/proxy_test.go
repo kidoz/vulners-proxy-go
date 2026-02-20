@@ -22,8 +22,11 @@ import (
 
 func TestProxyHandler_Handle_ConfigAPIKey(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("apiKey") != "config-key" {
-			t.Errorf("apiKey = %q, want %q", r.URL.Query().Get("apiKey"), "config-key")
+		if r.Header.Get("X-Api-Key") != "config-key" {
+			t.Errorf("X-Api-Key = %q, want %q", r.Header.Get("X-Api-Key"), "config-key")
+		}
+		if r.URL.Query().Get("apiKey") != "" {
+			t.Errorf("apiKey should not be in query, got %q", r.URL.Query().Get("apiKey"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -71,12 +74,11 @@ func TestProxyHandler_Handle_ConfigAPIKey(t *testing.T) {
 
 func TestProxyHandler_Handle_HeaderAPIKey(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("apiKey") != "header-key" {
-			t.Errorf("apiKey = %q, want %q", r.URL.Query().Get("apiKey"), "header-key")
+		if r.Header.Get("X-Api-Key") != "header-key" {
+			t.Errorf("X-Api-Key = %q, want %q", r.Header.Get("X-Api-Key"), "header-key")
 		}
-		// X-Api-Key should NOT be forwarded as a header
-		if r.Header.Get("X-Api-Key") != "" {
-			t.Errorf("X-Api-Key header should not be forwarded upstream")
+		if r.URL.Query().Get("apiKey") != "" {
+			t.Errorf("apiKey should not be in query, got %q", r.URL.Query().Get("apiKey"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

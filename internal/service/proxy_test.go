@@ -38,7 +38,7 @@ func TestFilterRequestHeaders(t *testing.T) {
 		{"Authorization stripped", "Authorization", 0},
 		{"Connection stripped", "Connection", 0},
 		{"X-Custom-Header stripped", "X-Custom-Header", 0},
-		{"X-Api-Key stripped", "X-Api-Key", 0},
+		{"X-Api-Key stripped by filter", "X-Api-Key", 0},
 		{"User-Agent injected", "User-Agent", 1},
 	}
 
@@ -103,38 +103,28 @@ func TestBuildUpstreamURL(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		path   string
-		query  url.Values
-		apiKey string
-		want   string
+		name  string
+		path  string
+		query url.Values
+		want  string
 	}{
 		{
-			name:   "simple path with query",
-			path:   "/api/v3/search/lucene/",
-			query:  url.Values{"query": {"cve-2024-1234"}},
-			apiKey: "test-key",
-			want:   "apiKey=test-key&query=cve-2024-1234",
+			name:  "path with query params",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{"query": {"cve-2024-1234"}},
+			want:  "query=cve-2024-1234",
 		},
 		{
-			name:   "no extra query",
-			path:   "/api/v3/search/lucene/",
-			query:  url.Values{},
-			apiKey: "test-key",
-			want:   "apiKey=test-key",
-		},
-		{
-			name:   "header-based key",
-			path:   "/api/v3/search/lucene/",
-			query:  url.Values{},
-			apiKey: "header-key",
-			want:   "apiKey=header-key",
+			name:  "no query params",
+			path:  "/api/v3/search/lucene/",
+			query: url.Values{},
+			want:  "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := s.buildUpstreamURL(tt.path, tt.query, tt.apiKey)
+			got := s.buildUpstreamURL(tt.path, tt.query)
 			u, err := url.Parse(got)
 			if err != nil {
 				t.Fatalf("parse URL: %v", err)
